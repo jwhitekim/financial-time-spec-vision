@@ -1,8 +1,8 @@
 {
   "dataset": "temperature",
   "name": "temperature_vit_lineplot",
-  "test_mse": 0.110341,
-  "test_smape": 0.17278,
-  "test_sign_acc": 0.674112,
-  "test_sign_acc_threshold": 0.531216
+  "test_mse": 0.261654,
+  "test_smape": 0.169895,
+  "test_sign_acc": 0.601019,
+  "test_sign_acc_threshold": 0.461232
 }

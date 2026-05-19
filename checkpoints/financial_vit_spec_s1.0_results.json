@@ -1,0 +1,8 @@
+{
+  "dataset": "financial",
+  "name": "financial_vit_spec_s1.0",
+  "test_mse": 0.611913,
+  "test_smape": 0.147601,
+  "test_sign_acc": 0.538365,
+  "test_sign_acc_threshold": 0.617616
+}

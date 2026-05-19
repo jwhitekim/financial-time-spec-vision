@@ -76,15 +76,10 @@ def build_loaders(args):
         val_ds   = make_synthetic_dataset("val",   **kw_ds)
         test_ds  = make_synthetic_dataset("test",  **kw_ds)
     elif args.dataset == "temperature":
-        full_ds    = make_temperature_dataset(split="train", **kw_ds)
-        n          = len(full_ds)
-        test_size  = max(1, int(n * 0.2))
-        val_size   = max(1, int(n * 0.1))
-        train_size = n - val_size - test_size
-        train_ds, val_ds, test_ds = random_split(
-            full_ds, [train_size, val_size, test_size],
-            generator=torch.Generator().manual_seed(42),
-        )
+        # 논문 설정: 2015→train, 2016→val, 2017→test, 각 4,220개 (422 관측소 × 10 윈도우)
+        train_ds = make_temperature_dataset(split="train", **kw_ds)
+        val_ds   = make_temperature_dataset(split="val",   **kw_ds)
+        test_ds  = make_temperature_dataset(split="test",  **kw_ds)
     elif args.dataset == "financial":
         train_ds = make_financial_dataset(split="train", **kw_ds)
         test_ds  = make_financial_dataset(split="test",  **kw_ds)
@@ -208,6 +203,15 @@ def main():
     parser.add_argument("--weight_decay", type=float, default=0.05)
     parser.add_argument("--patience",     type=int,   default=10,
                         help="Early stopping patience")
+    parser.add_argument(
+        "--scheduler",
+        choices=["cosine", "plateau"],
+        default="cosine",
+        help=(
+            "plateau : ReduceLROnPlateau (val_mse 기준, adaptive — 권장)\n"
+            "cosine  : CosineAnnealingLR T_max=epochs (원래 설정, 비교용)"
+        ),
+    )
     parser.add_argument("--seed",         type=int,   default=42)
 
     # 출력
@@ -273,9 +277,17 @@ def main():
         lr=args.lr,
         weight_decay=args.weight_decay,
     )
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-        optimizer, T_max=args.epochs, eta_min=1e-6,
-    )
+    # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(   # 원래 설정
+    #     optimizer, T_max=args.epochs, eta_min=1e-6,            # early stopping 43 epoch 시
+    # )                                                           # LR이 초기값의 89% — fine-tuning 미진입
+    if args.scheduler == "cosine":
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer, T_max=args.epochs, eta_min=1e-6,
+        )
+    else:  # plateau
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, mode="min", factor=0.5, patience=5, min_lr=1e-6,
+        )
 
     # ── 학습 ─────────────────────────────────────────────────────────────────
     best_val_mse = float("inf")
@@ -285,7 +297,10 @@ def main():
     for epoch in range(1, args.epochs + 1):
         train_loss  = train_one_epoch(model, train_loader, optimizer, device, epoch)
         val_metrics = evaluate(model, val_loader, device)
-        scheduler.step()
+        if args.scheduler == "cosine":
+            scheduler.step()
+        else:
+            scheduler.step(val_metrics["mse"])
 
         logger.info(
             f"[{epoch:3d}/{args.epochs}]  "

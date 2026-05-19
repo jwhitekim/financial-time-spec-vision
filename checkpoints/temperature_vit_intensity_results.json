@@ -1,8 +1,8 @@
 {
   "dataset": "temperature",
   "name": "temperature_vit_intensity",
-  "test_mse": 0.093862,
-  "test_smape": 0.140161,
-  "test_sign_acc": 0.73873,
-  "test_sign_acc_threshold": 0.603689
+  "test_mse": 0.264015,
+  "test_smape": 0.165421,
+  "test_sign_acc": 0.596872,
+  "test_sign_acc_threshold": 0.457536
 }

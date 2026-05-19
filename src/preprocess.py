@@ -179,26 +179,67 @@ def preprocess_synthetic(only_split: str | None = None,
 
 def preprocess_temperature(image_type: str = "spec",
                            scale_max_ratio: float = 0.5):
+    """
+    논문 설정에 맞게 train / val / test 각각 4,220개(422 관측소 × 10 윈도우) 생성.
+
+    연도별 슬라이스 (시작일 2015-05-02 기준):
+      train : 2015 — 인덱스   0-243  (244일, 시작점 185개)
+      val   : 2016 — 인덱스 244-609  (366일, 시작점 307개)
+      test  : 2017 — 인덱스 610-724  (115일, 시작점  56개)
+    각 슬라이스에서 길이 60(input 50 + forecast 10) 윈도우를 관측소당 10개 랜덤 샘플링.
+    """
     print("\n=== Temperature ===")
+    from datetime import date
     from data.fetch_temperature import parse_tsf_temperature
 
     tsf_path = os.path.join(ROOT, "data", "raw",
                             "temperature_rain_dataset_without_missing_values.tsf")
     series_dict = parse_tsf_temperature(tsf_path)
-    all_series  = list(series_dict.values())
+    all_series  = [np.array(v, dtype=np.float64) for v in series_dict.values()]
+    print(f"  전체 관측소: {len(all_series)}개")
 
-    rng     = np.random.default_rng(42)
-    indices = rng.choice(len(all_series), size=244, replace=False)
-    selected = [np.array(all_series[i]) for i in sorted(indices)]
+    START       = date(2015, 5, 2)
+    INPUT_LEN   = 50
+    FORECAST_LEN = 10
+    WINDOW_LEN  = INPUT_LEN + FORECAST_LEN   # 60
+    N_WINDOWS   = 10                          # 관측소당 윈도우 수
 
-    windows, targets, last_vals, norm_mins, norm_ranges = make_windows(
-        selected, input_len=50, forecast_len=10, stride=22, max_windows_per_series=30
-    )
-    print(f"  관측소: 244개, 총 샘플: {len(windows):,}개")
-    path = _out_path("temperature_train", image_type, scale_max_ratio)
-    save_npz(windows, targets, last_vals, norm_mins, norm_ranges, path,
-             desc="temperature",
-             image_type=image_type, scale_max_ratio=scale_max_ratio)
+    # 연도별 인덱스 경계 (end 는 exclusive)
+    year_splits = {
+        "train": (0,                              (date(2015, 12, 31) - START).days + 1),
+        "val":   ((date(2016,  1,  1) - START).days, (date(2016, 12, 31) - START).days + 1),
+        "test":  ((date(2017,  1,  1) - START).days, len(all_series[0])),
+    }
+
+    rng = np.random.default_rng(42)
+
+    for split, (s_idx, e_idx) in year_splits.items():
+        slice_len  = e_idx - s_idx
+        n_possible = slice_len - WINDOW_LEN + 1
+        print(f"  {split}: 인덱스 {s_idx}-{e_idx-1} ({slice_len}일, 가능 시작점 {n_possible}개)")
+
+        all_wins, all_tgts, all_last, all_nmin, all_nrng = [], [], [], [], []
+
+        for series in all_series:
+            starts = rng.choice(n_possible, size=N_WINDOWS, replace=False)
+            for s in sorted(starts):
+                full_w = series[s_idx + s : s_idx + s + WINDOW_LEN]
+                w, t   = full_w[:INPUT_LEN], full_w[INPUT_LEN:]
+                denom  = (w.max() - w.min()) or 1.0
+                w_min  = np.float32(w.min())
+                w_norm = ((w - w_min) / denom).astype(np.float32)
+                t_norm = ((t - w_min) / denom).astype(np.float32)
+                all_wins.append(w_norm)
+                all_tgts.append(t_norm)
+                all_last.append(np.float32(w_norm[-1]))
+                all_nmin.append(w_min)
+                all_nrng.append(np.float32(denom))
+
+        print(f"  총 샘플: {len(all_wins):,}개  (목표: 4,220)")
+        path = _out_path(f"temperature_{split}", image_type, scale_max_ratio)
+        save_npz(all_wins, all_tgts, all_last, all_nmin, all_nrng, path,
+                 desc=f"temperature/{split}",
+                 image_type=image_type, scale_max_ratio=scale_max_ratio)
 
 
 def preprocess_financial(image_type: str = "spec",
